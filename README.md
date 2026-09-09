@@ -50,7 +50,11 @@ Copy `.env.example` to `.env` and fill it in. In the
    accepts `https://` public hostnames plus `http://localhost`, so a LAN address
    like `http://192.168.1.20:5173` is rejected — Drive import works on the deployed
    HTTPS origin and on localhost, and the device picker covers LAN testing.
-4. Optionally add the project number as `VITE_GOOGLE_APP_ID`.
+4. Add the project number from the console dashboard as `VITE_GOOGLE_APP_ID`.
+   This is required. Under the `drive.file` scope the picker only grants the app
+   access to the file you picked if the picker was built with the project number,
+   so a build without it opens the picker fine and then fails the download with
+   a 404. The Drive option hides until all three values are set.
 
 `VITE_*` values are inlined at build time, so set them before building and
 rebuild after any change.

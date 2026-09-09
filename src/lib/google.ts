@@ -16,7 +16,10 @@ const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const GDOC_MIME = 'application/vnd.google-apps.document'
 
-export const driveConfigured = Boolean(CLIENT_ID && API_KEY)
+// APP_ID is not optional: with the drive.file scope, the Picker only registers
+// per-file access against the project whose number it is given, so a picker
+// built without setAppId hands back a file the app is then not allowed to read.
+export const driveConfigured = Boolean(CLIENT_ID && API_KEY && APP_ID)
 
 export class DriveError extends Error {}
 
@@ -187,23 +190,45 @@ async function pickDocument(token: string): Promise<PickedDoc | null> {
         }
       })
 
-    if (APP_ID) builder.setAppId(APP_ID)
+    builder.setAppId(APP_ID!)
     builder.build().setVisible(true)
   })
 }
 
 /* ------------------------------------------------------------------ download */
 
+/** Drive's error bodies are JSON; pull the human-readable reason out of one. */
+async function driveReason(res: Response): Promise<string> {
+  try {
+    const body = await res.json()
+    const message = body?.error?.message
+    if (typeof message === 'string' && message) return message
+  } catch {
+    // Not JSON, or already consumed - fall through to the status line.
+  }
+  return `${res.status} ${res.statusText}`.trim()
+}
+
 async function download(doc: PickedDoc, token: string): Promise<Blob> {
   // Native Google Docs have no bytes of their own - ask Drive to export .docx.
+  const base = `https://www.googleapis.com/drive/v3/files/${doc.id}`
   const url =
     doc.mimeType === GDOC_MIME
-      ? `https://www.googleapis.com/drive/v3/files/${doc.id}/export?mimeType=${encodeURIComponent(DOCX_MIME)}`
-      : `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`
+      ? `${base}/export?mimeType=${encodeURIComponent(DOCX_MIME)}&supportsAllDrives=true`
+      : `${base}?alt=media&supportsAllDrives=true`
 
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) {
-    throw new DriveError(`Could not download "${doc.name}" from Drive.`)
+    const reason = await driveReason(res)
+    // 403/404 here almost always means the drive.file grant never landed: the
+    // token is fine (the picker used it), the app just was not given this file.
+    const hint =
+      res.status === 404 || res.status === 403
+        ? ' Drive did not grant this build access to the file - check that VITE_GOOGLE_APP_ID is the project number of the same project as the OAuth client.'
+        : ''
+    throw new DriveError(
+      `Could not download "${doc.name}" from Drive: ${reason}.${hint}`,
+    )
   }
   return res.blob()
 }
