@@ -82,7 +82,9 @@ function Prompter() {
     onTap: () => dispatch({ type: 'TOGGLE_PLAY' }),
     onDragStart: engine.beginScrub,
     onDrag,
-    onDragEnd: engine.endScrub,
+    // finger velocity is screen-space; the offset moves the other way
+    onDragEnd: (velocity) => engine.endScrub(-velocity),
+    onWheel: engine.wheel,
     onTwoFingerSwipe: jumpParagraph,
     getContext,
   })

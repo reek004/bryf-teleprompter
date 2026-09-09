@@ -17,7 +17,10 @@ export interface ScrollEngine {
   rewind(): void
   /** Hold auto-advance while the operator drags, without leaving play mode. */
   beginScrub(): void
-  endScrub(): void
+  /** Release the hold. A fling velocity (px/sec, offset space) coasts first. */
+  endScrub(velocity?: number): void
+  /** Wheel / trackpad scrolling: nudge now, resume once the wheel goes quiet. */
+  wheel(delta: number): void
   remeasure(): void
 }
 
@@ -55,6 +58,8 @@ export function useScrollEngine({
   const lastTsRef = useRef(0)
   const animRef = useRef<{ from: number; to: number; start: number; ms: number } | null>(null)
   const scrubRef = useRef(false)
+  const momentumRef = useRef(0)
+  const wheelTimerRef = useRef<number | undefined>(undefined)
   const prevFlipYRef = useRef(settings.flipY)
 
   settingsRef.current = settings
@@ -103,6 +108,20 @@ export function useScrollEngine({
         offsetRef.current = anim.from + (anim.to - anim.from) * eased
         if (t >= 1) animRef.current = null
         apply()
+      } else if (momentumRef.current !== 0) {
+        // Flick coasting: exponential decay, same feel as a native scroller.
+        const max = maxScrollRef.current
+        const next = offsetRef.current + momentumRef.current * dt
+        momentumRef.current *= Math.exp(-4 * dt)
+        offsetRef.current = Math.min(max, Math.max(0, next))
+        if (
+          Math.abs(momentumRef.current) < 30 ||
+          offsetRef.current !== next // hit an end
+        ) {
+          momentumRef.current = 0
+          scrubRef.current = false
+        }
+        apply()
       } else if (playingRef.current && !scrubRef.current) {
         const { speed, fontSize, flipY } = settingsRef.current
         // Tie speed to font size so "50" reads at the same pace at any size.
@@ -122,7 +141,7 @@ export function useScrollEngine({
         apply()
       }
 
-      if (animRef.current || playingRef.current) {
+      if (animRef.current || momentumRef.current !== 0 || playingRef.current) {
         rafRef.current = requestAnimationFrame(tick)
       } else {
         lastTsRef.current = 0
@@ -146,6 +165,7 @@ export function useScrollEngine({
   useEffect(() => {
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      if (wheelTimerRef.current !== undefined) clearTimeout(wheelTimerRef.current)
     }
   }, [])
 
@@ -182,15 +202,18 @@ export function useScrollEngine({
       getMaxScroll: () => maxScrollRef.current,
       setOffset(next) {
         animRef.current = null
+        momentumRef.current = 0
         offsetRef.current = clamp(next)
         apply()
       },
       nudge(delta) {
         animRef.current = null
+        momentumRef.current = 0
         offsetRef.current = clamp(offsetRef.current + delta)
         apply()
       },
       animateTo(target, ms = 250) {
+        momentumRef.current = 0
         animRef.current = {
           from: offsetRef.current,
           to: clamp(target),
@@ -201,15 +224,37 @@ export function useScrollEngine({
       },
       beginScrub() {
         animRef.current = null
+        momentumRef.current = 0
         scrubRef.current = true
       },
-      endScrub() {
+      endScrub(velocity = 0) {
+        if (Math.abs(velocity) > 200) {
+          // Coast on: the hold stays until the momentum dies out.
+          momentumRef.current = velocity
+          ensureLoop()
+          return
+        }
         scrubRef.current = false
         // playback was never stopped, so the loop is still running
         ensureLoop()
       },
+      wheel(delta) {
+        animRef.current = null
+        momentumRef.current = 0
+        scrubRef.current = true
+        offsetRef.current = clamp(offsetRef.current + delta)
+        apply()
+        if (wheelTimerRef.current !== undefined) clearTimeout(wheelTimerRef.current)
+        wheelTimerRef.current = window.setTimeout(() => {
+          wheelTimerRef.current = undefined
+          scrubRef.current = false
+          ensureLoop()
+        }, 220)
+      },
       rewind() {
         animRef.current = null
+        momentumRef.current = 0
+        scrubRef.current = false
         offsetRef.current = settingsRef.current.flipY ? maxScrollRef.current : 0
         apply()
       },

@@ -33,6 +33,8 @@ npm run build      # static bundle in dist/
 - **Tap** the script — play / pause.
 - **Drag up/down** — scroll the script, playing or paused. Auto-advance is held
   for the length of the drag and resumes from wherever you let go.
+- **Flick** — a fast drag coasts on with momentum, like a normal scroller.
+- **Wheel / trackpad** — scrolls too; auto-advance resumes once the wheel is idle.
 - **Two-finger swipe** — jump one paragraph forward or back.
 - Speed is the slider only.
 

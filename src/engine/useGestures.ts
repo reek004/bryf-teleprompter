@@ -14,8 +14,10 @@ interface Options {
   onDragStart: () => void
   /** dy is total travel since the drag started (negative = finger moved up). */
   onDrag: (dy: number, start: DragStart) => void
-  /** fires when that drag lets go (or a second finger takes over) */
-  onDragEnd: () => void
+  /** fires when that drag lets go; velocity is the finger's px/sec at release */
+  onDragEnd: (velocity: number) => void
+  /** wheel / trackpad scrolling, in scroll-offset pixels */
+  onWheel: (delta: number) => void
   /** 1 = forward one paragraph, -1 = back one. */
   onTwoFingerSwipe: (dir: 1 | -1) => void
   getContext: () => DragStart
@@ -24,6 +26,7 @@ interface Options {
 const TAP_SLOP = 10
 const TAP_MS = 300
 const SWIPE_THRESHOLD = 40
+const VELOCITY_WINDOW_MS = 80
 
 /**
  * Touch driving for the prompter surface. Pointer Events cover finger, pencil
@@ -36,11 +39,12 @@ export function useGestures({
   onDragStart,
   onDrag,
   onDragEnd,
+  onWheel,
   onTwoFingerSwipe,
   getContext,
 }: Options): void {
-  const cb = useRef({ onTap, onDragStart, onDrag, onDragEnd, onTwoFingerSwipe, getContext })
-  cb.current = { onTap, onDragStart, onDrag, onDragEnd, onTwoFingerSwipe, getContext }
+  const cb = useRef({ onTap, onDragStart, onDrag, onDragEnd, onWheel, onTwoFingerSwipe, getContext })
+  cb.current = { onTap, onDragStart, onDrag, onDragEnd, onWheel, onTwoFingerSwipe, getContext }
 
   useEffect(() => {
     const el = elementRef.current
@@ -55,6 +59,16 @@ export function useGestures({
     let mode: 'none' | 'single' | 'two' = 'none'
     let swipeBaseY = 0
     let swipeFired = false
+    // recent (time, y) samples, for the release velocity of a flick
+    let samples: { t: number; y: number }[] = []
+
+    const velocity = () => {
+      if (samples.length < 2) return 0
+      const last = samples[samples.length - 1]
+      const first = samples.find((s) => last.t - s.t < VELOCITY_WINDOW_MS) ?? samples[0]
+      const dt = last.t - first.t
+      return dt > 0 ? ((last.y - first.y) / dt) * 1000 : 0
+    }
 
     const avgY = () => {
       let sum = 0
@@ -67,6 +81,7 @@ export function useGestures({
       moved = false
       swipeFired = false
       start = null
+      samples = []
     }
 
     const onPointerDown = (e: PointerEvent) => {
@@ -83,9 +98,10 @@ export function useGestures({
         startY = e.clientY
         startTime = e.timeStamp
         start = cb.current.getContext()
+        samples = [{ t: e.timeStamp, y: e.clientY }]
       } else if (points.size === 2) {
         // A second finger cancels whatever the first one was doing.
-        if (mode === 'single' && moved) cb.current.onDragEnd()
+        if (mode === 'single' && moved) cb.current.onDragEnd(0)
         mode = 'two'
         moved = true
         swipeFired = false
@@ -111,6 +127,8 @@ export function useGestures({
       }
 
       if (mode !== 'single' || !start) return
+      samples.push({ t: e.timeStamp, y: e.clientY })
+      if (samples.length > 12) samples.shift()
       const dy = e.clientY - startY
       if (!moved && Math.hypot(e.clientX - startX, dy) > TAP_SLOP) {
         moved = true
@@ -127,18 +145,28 @@ export function useGestures({
       if (points.size > 0) return
 
       if (mode === 'single') {
-        if (moved) cb.current.onDragEnd()
+        if (moved) cb.current.onDragEnd(velocity())
         else if (e.timeStamp - startTime < TAP_MS) cb.current.onTap()
       }
       reset()
     }
 
+    const onWheelEvent = (e: WheelEvent) => {
+      if ((e.target as HTMLElement | null)?.closest('[data-toolbar]')) return
+      e.preventDefault()
+      // DOM_DELTA_LINE / _PAGE come from mouse wheels and older browsers
+      const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1
+      cb.current.onWheel(e.deltaY * scale)
+    }
+
+    el.addEventListener('wheel', onWheelEvent, { passive: false })
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove)
     el.addEventListener('pointerup', endPointer)
     el.addEventListener('pointercancel', endPointer)
 
     return () => {
+      el.removeEventListener('wheel', onWheelEvent)
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
       el.removeEventListener('pointerup', endPointer)
