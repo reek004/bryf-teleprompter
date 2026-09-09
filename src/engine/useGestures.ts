@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
+import { dismissedPopover } from '../lib/popover'
 
 export interface DragStart {
   /** scroll offset captured when the drag began */
@@ -70,6 +71,8 @@ export function useGestures({
 
     const onPointerDown = (e: PointerEvent) => {
       if ((e.target as HTMLElement | null)?.closest('[data-toolbar]')) return
+      // this tap only closed a popover - it is not a play/pause tap
+      if (dismissedPopover(e)) return
       points.set(e.pointerId, { x: e.clientX, y: e.clientY })
       el.setPointerCapture(e.pointerId)
 
