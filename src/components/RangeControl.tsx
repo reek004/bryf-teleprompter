@@ -9,7 +9,7 @@ interface Props {
 
 export default function RangeControl({ label, value, min, max, step = 1, onChange }: Props) {
   return (
-    <label className="flex w-32 shrink-0 flex-col items-center gap-0.5 sm:w-40">
+    <label className="flex w-28 shrink-0 flex-col items-center gap-0.5 xl:w-40">
       <input
         type="range"
         className="w-full"
